@@ -4,8 +4,6 @@ import (
 	"log"
 	"runtime"
 
-	"github.com/moolen/glitchlock/glitch"
-
 	"github.com/kbinani/screenshot"
 
 	"github.com/go-gl/gl/v4.1-core/gl"
@@ -50,14 +48,6 @@ func main() {
 
 func programLoop(window *glfw.Window, videoMode glfw.VidMode) error {
 	screen, err := screenshot.CaptureDisplay(0)
-	if err != nil {
-		panic(err)
-	}
-	screen, err = glitch.Distort(screen, &glitch.DistortConfig{
-		Pieces:   10,
-		Pixelate: 2,
-		Seed:     1312,
-	})
 	if err != nil {
 		panic(err)
 	}
