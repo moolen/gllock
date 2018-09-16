@@ -4,6 +4,8 @@ import (
 	"errors"
 	"image"
 	"image/draw"
+
+	// decode images
 	_ "image/jpeg"
 	_ "image/png"
 	"os"
@@ -11,103 +13,73 @@ import (
 	"github.com/go-gl/gl/v4.1-core/gl"
 )
 
+// Texture -
 type Texture struct {
-	handle  uint32
-	target  uint32 // same target as gl.BindTexture(<this param>, ...)
-	texUnit uint32 // Texture unit that is currently bound to ex: gl.TEXTURE0
+	Handle uint32
+	Width  int32
+	Height int32
 }
 
 var errUnsupportedStride = errors.New("unsupported stride, only 32-bit colors supported")
 
-var errTextureNotBound = errors.New("texture not bound")
-
-func NewTextureFromFile(file string, wrapR, wrapS int32) (*Texture, error) {
-	imgFile, err := os.Open(file)
+// MustTexture -
+func MustTexture(img image.Image, wrapR, wrapS int32) *Texture {
+	tex, err := NewTexture(img, wrapR, wrapS)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
-	defer imgFile.Close()
-
-	// Decode detexts the type of image as long as its image/<type> is imported
-	img, _, err := image.Decode(imgFile)
-	if err != nil {
-		return nil, err
-	}
-	return NewTexture(img, wrapR, wrapS)
-}
-
-func NewRawTexture(handle, target, tex uint32) *Texture {
-	return &Texture{
-		handle, target, tex,
-	}
+	return tex
 }
 
 func NewTexture(img image.Image, wrapR, wrapS int32) (*Texture, error) {
 	rgba := image.NewRGBA(img.Bounds())
 	draw.Draw(rgba, rgba.Bounds(), img, image.Pt(0, 0), draw.Src)
-	if rgba.Stride != rgba.Rect.Size().X*4 { // TODO-cs: why?
+	if rgba.Stride != rgba.Rect.Size().X*4 {
 		return nil, errUnsupportedStride
 	}
-
-	var handle uint32
-	gl.GenTextures(1, &handle)
-
-	target := uint32(gl.TEXTURE_2D)
-	internalFmt := int32(gl.SRGB_ALPHA)
-	format := uint32(gl.RGBA)
 	width := int32(rgba.Rect.Size().X)
 	height := int32(rgba.Rect.Size().Y)
-	pixType := uint32(gl.UNSIGNED_BYTE)
-	dataPtr := gl.Ptr(rgba.Pix)
-
 	texture := Texture{
-		handle: handle,
-		target: target,
+		Width:  width,
+		Height: height,
 	}
+	gl.GenTextures(1, &texture.Handle)
 
 	texture.Bind(gl.TEXTURE0)
-	defer texture.UnBind()
+	defer texture.Unbind()
 
-	// set the texture wrapping/filtering options (applies to current bound texture obj)
-	// TODO-cs
-	gl.TexParameteri(texture.target, gl.TEXTURE_WRAP_R, wrapR)
-	gl.TexParameteri(texture.target, gl.TEXTURE_WRAP_S, wrapS)
-	gl.TexParameteri(texture.target, gl.TEXTURE_MIN_FILTER, gl.LINEAR) // minification filter
-	gl.TexParameteri(texture.target, gl.TEXTURE_MAG_FILTER, gl.LINEAR) // magnification filter
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_R, wrapR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapS)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 
-	gl.TexImage2D(target, 0, internalFmt, width, height, 0, format, pixType, dataPtr)
+	gl.TexImage2D(gl.TEXTURE_2D, 0, int32(gl.SRGB_ALPHA), texture.Width, texture.Height, 0, uint32(gl.RGBA), uint32(gl.UNSIGNED_BYTE), gl.Ptr(rgba.Pix))
 
-	gl.GenerateMipmap(texture.handle)
+	gl.GenerateMipmap(texture.Handle)
 
 	return &texture, nil
 }
 
-func (tex *Texture) Bind(texUnit uint32) {
-	gl.ActiveTexture(texUnit)
-	gl.BindTexture(tex.target, tex.handle)
-	tex.texUnit = texUnit
+// Bind -
+func (tex *Texture) Bind(unit uint32) {
+	gl.ActiveTexture(unit)
+	gl.BindTexture(gl.TEXTURE_2D, tex.Handle)
 }
 
-func (tex *Texture) UnBind() {
-	tex.texUnit = 0
-	gl.BindTexture(tex.target, 0)
+// Unbind -
+func (tex *Texture) Unbind() {
+	gl.BindTexture(gl.TEXTURE_2D, 0)
 }
 
-func (tex *Texture) SetUniform(uniformLoc int32) error {
-	if tex.texUnit == 0 {
-		return errTextureNotBound
-	}
-	gl.Uniform1i(uniformLoc, int32(tex.texUnit-gl.TEXTURE0))
-	return nil
-}
-
-func loadImageFile(file string) (image.Image, error) {
-	infile, err := os.Open(file)
+func MustTextureFromFile(path string, wrapR, wrapS int32) *Texture {
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
-	defer infile.Close()
-
-	img, _, err := image.Decode(infile)
-	return img, err
+	defer file.Close()
+	img, _, err := image.Decode(file)
+	if err != nil {
+		panic(err)
+	}
+	return MustTexture(img, wrapR, wrapS)
 }
