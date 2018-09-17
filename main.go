@@ -3,13 +3,28 @@ package main
 import (
 	"flag"
 	"fmt"
+	"image"
+	"os"
+	"os/signal"
 	"runtime"
+	"time"
 
+	"github.com/BurntSushi/xgb"
+	"github.com/BurntSushi/xgb/xproto"
+	"github.com/BurntSushi/xgbutil"
+	"github.com/BurntSushi/xgbutil/ewmh"
+	"github.com/BurntSushi/xgbutil/icccm"
+	"github.com/BurntSushi/xgbutil/keybind"
+	"github.com/BurntSushi/xgbutil/mousebind"
+	"github.com/BurntSushi/xgbutil/xevent"
+	"github.com/BurntSushi/xgbutil/xgraphics"
+	"github.com/BurntSushi/xgbutil/xwindow"
 	"github.com/kbinani/screenshot"
 
 	"github.com/go-gl/gl/v4.1-core/gl"
 	"github.com/go-gl/glfw/v3.1/glfw"
 
+	"github.com/moolen/glitchlock/pam"
 	"github.com/moolen/gllock/gfx"
 	"github.com/moolen/gllock/gfx/gvd"
 	log "github.com/sirupsen/logrus"
@@ -19,15 +34,16 @@ func init() {
 	runtime.LockOSThread()
 }
 
-const maxFPS = 25.0
-const maxTime = 1.0 / maxFPS
+var maxFPS = 60.0
+var maxTime = 1.0 / maxFPS
 
 var version = "dev"
 
 func main() {
 
 	flagVersion := flag.Bool("version", false, "show version and exit")
-	flagOverlay := flag.String("overlay", "", "overlay image")
+	flagOverlay := flag.String("overlay", "", "specify a path to an image. it will be overlayed at the center of the screen")
+	flagDebug := flag.Bool("debug", false, "debug mode: additional log info")
 	flag.Parse()
 
 	if *flagVersion {
@@ -35,12 +51,19 @@ func main() {
 		return
 	}
 
+	if *flagDebug {
+		log.SetLevel(log.DebugLevel)
+		log.Debugln("enabled debug mode")
+	}
+
 	if err := glfw.Init(); err != nil {
 		log.Fatalln("failed to inifitialize glfw:", err)
 	}
 	defer glfw.Terminate()
 
-	videoMode := glfw.GetPrimaryMonitor().GetVideoMode()
+	primaryMonitor := glfw.GetPrimaryMonitor()
+	videoMode := primaryMonitor.GetVideoMode()
+	mons := glfw.GetMonitors()
 	glfw.WindowHint(glfw.Resizable, glfw.False)
 	glfw.WindowHint(glfw.ContextVersionMajor, 4)
 	glfw.WindowHint(glfw.ContextVersionMinor, 1)
@@ -56,7 +79,41 @@ func main() {
 		panic(err)
 	}
 
-	window.SetKeyCallback(keyCallback)
+	xorg, err := NewXorg()
+	xorg.Fullscreen("gllock")
+	err = xorg.GrabInput()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		for range c {
+			window.SetShouldClose(true)
+			return
+		}
+	}()
+
+	go func() {
+		done := xorg.PasswordMatch()
+		for {
+			select {
+			case <-done:
+				window.SetShouldClose(true)
+				return
+			}
+		}
+	}()
+
+	for _, monitor := range mons {
+		x, y := monitor.GetPos()
+		if monitor.GetName() != primaryMonitor.GetName() {
+			videoMode := monitor.GetVideoMode()
+			log.Debugf("mon %#v %#v pos: %d, %d", monitor, primaryMonitor, x, y)
+			xorg.Overlay(x, y, videoMode.Width, videoMode.Height)
+		}
+	}
 
 	err = programLoop(window, *flagOverlay, *videoMode)
 	if err != nil {
@@ -132,9 +189,174 @@ func programLoop(window *glfw.Window, overlay string, videoMode glfw.VidMode) er
 	return nil
 }
 
-func keyCallback(window *glfw.Window, key glfw.Key, scancode int, action glfw.Action,
-	mods glfw.ModifierKey) {
-	if key == glfw.KeyEscape && action == glfw.Press {
-		window.SetShouldClose(true)
+type Xorg struct {
+	X  *xgb.Conn
+	Xu *xgbutil.XUtil
+}
+
+func NewXorg() (*Xorg, error) {
+	X, err := xgb.NewConn()
+	if err != nil {
+		return nil, err
 	}
+	Xu, err := xgbutil.NewConnXgb(X)
+	if err != nil {
+		return nil, err
+	}
+	return &Xorg{X, Xu}, nil
+}
+
+func (x *Xorg) GrabInput() error {
+	keybind.Initialize(x.Xu)
+	xscreen := xproto.Setup(x.X).DefaultScreen(x.X)
+	grabc := xproto.GrabKeyboard(x.X, false, xscreen.Root, xproto.TimeCurrentTime,
+		xproto.GrabModeAsync, xproto.GrabModeAsync,
+	)
+	repk, err := grabc.Reply()
+	if err != nil {
+		return fmt.Errorf("error grabbing Keyboard")
+	}
+	if repk.Status != xproto.GrabStatusSuccess {
+		return fmt.Errorf("could not grab keyboard")
+	}
+	grabp := xproto.GrabPointer(x.X, false, xscreen.Root, (xproto.EventMaskKeyPress|xproto.EventMaskKeyRelease)&0,
+		xproto.GrabModeAsync, xproto.GrabModeAsync, xproto.WindowNone, xproto.CursorNone, xproto.TimeCurrentTime)
+	repp, err := grabp.Reply()
+	if err != nil {
+		return fmt.Errorf("error grabbing pointer")
+	}
+	if repp.Status != xproto.GrabStatusSuccess {
+		return fmt.Errorf("could not grab pointer")
+	}
+	return nil
+}
+
+func (x *Xorg) FindWindow(name string) (xproto.Window, error) {
+	clientids, err := ewmh.ClientListGet(x.Xu)
+	if err != nil {
+		return 0, err
+	}
+	for _, clientid := range clientids {
+		winName, err := ewmh.WmNameGet(x.Xu, clientid)
+		if err != nil || len(winName) == 0 {
+			winName, err = icccm.WmNameGet(x.Xu, clientid)
+			if err != nil || len(winName) == 0 {
+				winName = "N/A"
+			}
+		}
+		if winName == name {
+			return clientid, nil
+		}
+	}
+	return 0, fmt.Errorf("X Window not found")
+}
+
+func (x *Xorg) Fullscreen(name string) error {
+	win, err := x.FindWindow(name)
+	if err != nil {
+		return err
+	}
+	err = ewmh.WmStateReq(x.Xu, win, ewmh.StateToggle,
+		"_NET_WM_STATE_FULLSCREEN")
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (x *Xorg) PasswordMatch() <-chan struct{} {
+	lastInput := time.Now()
+	done := make(chan struct{}, 1)
+
+	go func() {
+		var password string
+		for {
+			ev, err := x.X.WaitForEvent()
+			if ev == nil && err == nil {
+				log.Error(fmt.Errorf("Both event and error are nil. Exiting"))
+				done <- struct{}{}
+				return
+			}
+			if err != nil {
+				log.Error(fmt.Errorf("Both event and error are nil. Exiting"))
+				done <- struct{}{}
+				return
+			}
+			if time.Now().Sub(lastInput) > time.Second*2 {
+				log.Debugf("timeout reached. clearing password")
+				password = ""
+			}
+			switch e := ev.(type) {
+			case xproto.KeyPressEvent:
+				key := keybind.LookupString(x.Xu, e.State, e.Detail)
+				log.Debugf("keypress: %s %v ", key, e)
+				lastInput = time.Now()
+				if len(key) == 1 {
+					password += key
+				}
+				if keybind.KeyMatch(x.Xu, "BackSpace", e.State, e.Detail) && len(password) > 0 {
+					password = password[:len(password)-1]
+				}
+				log.Debugf("current password: %s", password)
+				if keybind.KeyMatch(x.Xu, "Return", e.State, e.Detail) {
+					log.Debugf("...checking password")
+					if pam.AuthenticateCurrentUser(password) {
+						done <- struct{}{}
+						return
+					}
+					log.Debugf("password does not match")
+				}
+			}
+		}
+	}()
+	return done
+}
+
+func (xorg *Xorg) Overlay(x, y, width, height int) error {
+	log.Debugf("overlay size: %d %d %d %d", x, y, x+width, y+height)
+	rgba := image.NewRGBA(image.Rect(x, y, x+width, y+height))
+	ximg := xgraphics.NewConvert(xorg.Xu, rgba)
+	win, err := xwindow.Generate(xorg.Xu)
+	if err != nil {
+		return err
+	}
+	win.Create(xorg.Xu.RootWin(), x, y, width, height, 0)
+	win.WMGracefulClose(func(w *xwindow.Window) {
+		xevent.Detach(w.X, w.Id)
+		keybind.Detach(w.X, w.Id)
+		mousebind.Detach(w.X, w.Id)
+		w.Destroy()
+	})
+	err = icccm.WmStateSet(xorg.Xu, win.Id, &icccm.WmState{
+		State: icccm.StateNormal,
+	})
+	if err != nil {
+		return err
+	}
+	err = icccm.WmNormalHintsSet(xorg.Xu, win.Id, &icccm.NormalHints{
+		Flags:     icccm.SizeHintPMinSize | icccm.SizeHintPMaxSize,
+		MinWidth:  uint(width),
+		MinHeight: uint(height),
+		MaxWidth:  uint(width),
+		MaxHeight: uint(height),
+	})
+	if err != nil {
+		return err
+	}
+
+	err = ewmh.WmStateReq(xorg.Xu, win.Id, ewmh.StateToggle,
+		"_NET_WM_STATE_FULLSCREEN")
+	if err != nil {
+		return err
+	}
+
+	// Paint our image before mapping.
+	ximg.XSurfaceSet(win.Id)
+	ximg.XDraw()
+	ximg.XPaint(win.Id)
+	win.Map()
+
+	// some WM override this position after mapping
+	win.Move(x, y)
+	return nil
 }
