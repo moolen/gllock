@@ -19,7 +19,7 @@ import (
 	"github.com/BurntSushi/xgbutil/xevent"
 	"github.com/BurntSushi/xgbutil/xgraphics"
 	"github.com/BurntSushi/xgbutil/xwindow"
-	"github.com/kbinani/screenshot"
+	"github.com/gobuffalo/packr"
 
 	"github.com/go-gl/gl/v4.1-core/gl"
 	"github.com/go-gl/glfw/v3.1/glfw"
@@ -43,11 +43,17 @@ func main() {
 
 	flagVersion := flag.Bool("version", false, "show version and exit")
 	flagOverlay := flag.String("overlay", "", "specify a path to an image. it will be overlayed at the center of the screen")
+	flagBackground := flag.String("bg", "", "specify a path to an image. it will be the background of the screen")
 	flagDebug := flag.Bool("debug", false, "debug mode: additional log info")
 	flag.Parse()
 
 	if *flagVersion {
 		fmt.Printf("gllock %s\n", version)
+		return
+	}
+
+	if *flagBackground == "" {
+		fmt.Println("no background specifed but required")
 		return
 	}
 
@@ -115,31 +121,37 @@ func main() {
 		}
 	}
 
-	err = programLoop(window, *flagOverlay, *videoMode)
+	err = programLoop(window, *flagBackground, *flagOverlay, *videoMode)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func programLoop(window *glfw.Window, overlay string, videoMode glfw.VidMode) error {
-	screen, err := screenshot.CaptureDisplay(0)
-	if err != nil {
-		panic(err)
-	}
+func programLoop(window *glfw.Window, background, overlay string, videoMode glfw.VidMode) error {
+
 	var overlayPlane *gfx.Mesh
 	var overlayTex *gfx.Texture
 	if overlay != "" {
 		overlayTex = gfx.MustTextureFromFile(overlay, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE)
 		overlayPlane = gfx.NewMesh(gvd.PlaneVertices, gvd.PlaneIndices, []*gfx.Texture{overlayTex})
 	}
+	backgroundFile, err := os.Open(background)
+	if err != nil {
+		return err
+	}
+	screen, _, err := image.Decode(backgroundFile)
+	if err != nil {
+		return err
+	}
 
+	box := packr.NewBox("shaders")
 	screenTex := gfx.MustTexture(screen, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE)
-	planeProg := gfx.MustMakeProgram("shaders/regular.vert", "shaders/regular.frag")
+	planeProg := gfx.MustMakeProgram(box.String("regular.vert"), box.String("regular.frag"))
 	screenshotPlane := gfx.NewMesh(gvd.PlaneVertices, gvd.PlaneIndices, []*gfx.Texture{screenTex})
 
 	fbo := gfx.MustFramebuffer(videoMode.Width, videoMode.Height)
 	defer fbo.Destroy()
-	fxProg := gfx.MustMakeProgram("shaders/fx.vert", "shaders/fx.frag")
+	fxProg := gfx.MustMakeProgram(box.String("fx.vert"), box.String("fx.frag"))
 	fxPlane := gfx.NewMesh(gvd.InvertedTexPlaneVertices, gvd.PlaneIndices, []*gfx.Texture{fbo.Texture})
 
 	gl.Enable(gl.BLEND)

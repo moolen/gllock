@@ -21,11 +21,11 @@ type Program struct {
 
 // MustMakeProgram -
 func MustMakeProgram(vert, frag string) *Program {
-	vertShader, err := NewShaderFromFile(vert, gl.VERTEX_SHADER)
+	vertShader, err := NewShader(vert, gl.VERTEX_SHADER)
 	if err != nil {
 		panic(err)
 	}
-	fragShader, err := NewShaderFromFile(frag, gl.FRAGMENT_SHADER)
+	fragShader, err := NewShader(frag, gl.FRAGMENT_SHADER)
 	if err != nil {
 		panic(err)
 	}

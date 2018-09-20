@@ -6,11 +6,7 @@ LDFLAGS=-ldflags "-w -s -X main.version=${VERSION}"
 
 # Builds the project
 build:
-	go build ${LDFLAGS} -o ${BINARY}
-
-# Installs our project: copies binaries
-install:
-	go install ${LDFLAGS}
+	packr build ${LDFLAGS} -o ${BINARY}
 
 # Cleans our project: deletes binaries
 clean:
