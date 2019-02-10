@@ -25,7 +25,7 @@ func init() {
 	runtime.LockOSThread()
 }
 
-var maxFPS = 60.0
+var maxFPS = 24.0
 var maxTime = 1.0 / maxFPS
 
 var version = "dev"
