@@ -7,17 +7,24 @@ import (
 	"github.com/go-gl/gl/v4.1-core/gl"
 )
 
-// Mesh -
+// Mesh is a collection of vertices, that
+// define the shape of a 3D object
 type Mesh struct {
-	VAO      uint32
-	VBO      uint32
-	EBO      uint32
+	// VAO is the vertex array object that stores the vertex data
+	VAO uint32
+	// VBO is the vertex buffer object used as a source for vertex array data
+	VBO uint32
+	// EBO is the element buffer object used to store the indices for the vertex data
+	EBO uint32
+	// Vertices are the actual points - used only for the initialization
 	Vertices []float32
-	Indices  []uint32
+	// Indices are the actual indices for the vertices - used only for the initialization
+	Indices []uint32
+	// Textures are the textures that the Mesh references in the fragment shader
 	Textures []*Texture
 }
 
-// NewMesh -
+// NewMesh allocates the buffer objects
 func NewMesh(vertices []float32, indices []uint32, textures []*Texture) *Mesh {
 	VAO, VBO, EBO := createVAO(vertices, indices)
 	return &Mesh{
@@ -30,7 +37,8 @@ func NewMesh(vertices []float32, indices []uint32, textures []*Texture) *Mesh {
 	}
 }
 
-// Draw -
+// Draw binds all referenced textures and vertex array objects
+// and draws triangles
 func (m *Mesh) Draw(program *Program) {
 	for i, tex := range m.Textures {
 		tex.Bind(uint32(gl.TEXTURE0 + i))
@@ -47,7 +55,6 @@ func (m *Mesh) Draw(program *Program) {
 }
 
 func createVAO(vertices []float32, indices []uint32) (uint32, uint32, uint32) {
-
 	var VAO, VBO, EBO uint32
 	gl.GenVertexArrays(1, &VAO)
 	gl.GenBuffers(1, &VBO)

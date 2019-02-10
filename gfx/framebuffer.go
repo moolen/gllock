@@ -4,7 +4,7 @@ import (
 	"github.com/go-gl/gl/v4.1-core/gl"
 )
 
-// Framebuffer -
+// Framebuffer is a wrapper for the gl framebuffer
 type Framebuffer struct {
 	Handle        uint32
 	RenderTexture uint32

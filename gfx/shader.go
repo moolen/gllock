@@ -8,94 +8,14 @@ import (
 	"github.com/go-gl/gl/v4.1-core/gl"
 )
 
-// Shader -
+// Shader is a wrapper for the gl Shader
 type Shader struct {
+	// Handle is the shader handle used for various gl_* calls
 	Handle uint32
 }
 
-// Program -
-type Program struct {
-	Handle  uint32
-	Shaders []*Shader
-}
-
-// MustMakeProgram -
-func MustMakeProgram(vert, frag string) *Program {
-	vertShader, err := NewShader(vert, gl.VERTEX_SHADER)
-	if err != nil {
-		panic(err)
-	}
-	fragShader, err := NewShader(frag, gl.FRAGMENT_SHADER)
-	if err != nil {
-		panic(err)
-	}
-	shaderProgram, err := NewProgram(vertShader, fragShader)
-	if err != nil {
-		panic(err)
-	}
-	return shaderProgram
-}
-
-// Delete -
-func (shader *Shader) Delete() {
-	gl.DeleteShader(shader.Handle)
-}
-
-// Delete -
-func (prog *Program) Delete() {
-	for _, shader := range prog.Shaders {
-		shader.Delete()
-	}
-	gl.DeleteProgram(prog.Handle)
-}
-
-func (prog *Program) Attach(shaders ...*Shader) {
-	for _, shader := range shaders {
-		gl.AttachShader(prog.Handle, shader.Handle)
-		prog.Shaders = append(prog.Shaders, shader)
-	}
-}
-
-func (prog *Program) Use() {
-	gl.UseProgram(prog.Handle)
-}
-
-func (prog *Program) Link() error {
-	gl.LinkProgram(prog.Handle)
-	return getGlError(prog.Handle, gl.LINK_STATUS, gl.GetProgramiv, gl.GetProgramInfoLog,
-		"program link failure")
-}
-
-func (prog *Program) GetUniformLocation(name string) int32 {
-	return gl.GetUniformLocation(prog.Handle, gl.Str(name+"\x00"))
-}
-
-func NewProgram(shaders ...*Shader) (*Program, error) {
-	prog := &Program{Handle: gl.CreateProgram()}
-	prog.Attach(shaders...)
-
-	if err := prog.Link(); err != nil {
-		return nil, err
-	}
-
-	return prog, nil
-}
-
-func NewShader(src string, sType uint32) (*Shader, error) {
-
-	handle := gl.CreateShader(sType)
-	glSrc, freeFn := gl.Strs(src + "\x00")
-	defer freeFn()
-	gl.ShaderSource(handle, 1, glSrc, nil)
-	gl.CompileShader(handle)
-	err := getGlError(handle, gl.COMPILE_STATUS, gl.GetShaderiv, gl.GetShaderInfoLog,
-		"shader compile failure")
-	if err != nil {
-		return nil, err
-	}
-	return &Shader{Handle: handle}, nil
-}
-
+// NewShaderFromFile reads the shader source code
+// from a file and compiles it
 func NewShaderFromFile(file string, sType uint32) (*Shader, error) {
 	src, err := ioutil.ReadFile(file)
 	if err != nil {
@@ -112,6 +32,26 @@ func NewShaderFromFile(file string, sType uint32) (*Shader, error) {
 		return nil, err
 	}
 	return &Shader{Handle: handle}, nil
+}
+
+// NewShader compiles the given source code
+func NewShader(src string, sType uint32) (*Shader, error) {
+	handle := gl.CreateShader(sType)
+	glSrc, freeFn := gl.Strs(src + "\x00")
+	defer freeFn()
+	gl.ShaderSource(handle, 1, glSrc, nil)
+	gl.CompileShader(handle)
+	err := getGlError(handle, gl.COMPILE_STATUS, gl.GetShaderiv, gl.GetShaderInfoLog,
+		"shader compile failure")
+	if err != nil {
+		return nil, err
+	}
+	return &Shader{Handle: handle}, nil
+}
+
+// Delete deletes the shader
+func (shader *Shader) Delete() {
+	gl.DeleteShader(shader.Handle)
 }
 
 type getObjIv func(uint32, uint32, *int32)
