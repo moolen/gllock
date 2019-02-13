@@ -149,12 +149,28 @@ func programLoop(window *glfw.Window, primaryScreen snap.Screen, snapshot *image
 	window.SetPos(primaryScreen.X, primaryScreen.Y)
 	box := packr.NewBox("shaders")
 	screenTex := gfx.MustTexture(snapshot, gl.CLAMP_TO_EDGE, gl.CLAMP_TO_EDGE)
-	planeProg := gfx.MustMakeProgram(box.String("regular.vert"), box.String("regular.frag"))
+	regVert, err := box.FindString("regular.vert")
+	if err != nil {
+		return err
+	}
+	regFrag, err := box.FindString("regular.frag")
+	if err != nil {
+		return err
+	}
+	planeProg := gfx.MustMakeProgram(regVert, regFrag)
 	screenshotPlane := gfx.NewMesh(gvd.PlaneVertices, gvd.PlaneIndices, []*gfx.Texture{screenTex})
 
 	fbo := gfx.MustFramebuffer(videoMode.Width, videoMode.Height)
 	defer fbo.Destroy()
-	fxProg := gfx.MustMakeProgram(box.String("fx.vert"), box.String("fx.frag"))
+	fxVert, err := box.FindString("fx.vert")
+	if err != nil {
+		return err
+	}
+	fxFrag, err := box.FindString("fx.frag")
+	if err != nil {
+		return err
+	}
+	fxProg := gfx.MustMakeProgram(fxVert, fxFrag)
 	fxPlane := gfx.NewMesh(gvd.InvertedTexPlaneVertices, gvd.PlaneIndices, []*gfx.Texture{fbo.Texture})
 
 	gl.Enable(gl.BLEND)
